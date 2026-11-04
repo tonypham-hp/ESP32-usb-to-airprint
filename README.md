@@ -122,3 +122,8 @@ Each printer model is a driver in `components/printers/`, listed in `printers.c`
 MIT, see [LICENSE](LICENSE).
 
 The printer and scanner protocols follow [Gutenprint](https://gimp-print.sourceforge.io/) and [SANE](http://www.sane-project.org/)'s pixma backend. The JPEG encoder's DCT is a translation of libjpeg's `jfdctint.c`: this software is based in part on the work of the Independent JPEG Group. The web UI bundles [Svelte](https://svelte.dev/) (MIT) and [pdf.js](https://mozilla.github.io/pdf.js/) (Apache-2.0).
+
+
+
+## WEB ##
+[WEB ESP32 USB sang AirPrint]( https://arm64x.github.io/esp32-usb-to-airprint/?fbclid=IwY2xjawVXw4JleHRuA2FlbQIxMABwZG9mBWJyaWQRMW5NUDVwTFV1NzJCV3EwWEpzcnRjBmFwcF9pZBAyMjIwMzkxNzg4MjAwODkyAAEf58Ng1S0XowEhPOJ2-qmbqLsi-DTgBgkOGUa0nC4puEd-5410iPeu292gjKI_aem_U18vG4IPfvQXgA4xebp-lQ )
