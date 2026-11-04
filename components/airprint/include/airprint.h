@@ -1,0 +1,110 @@
+// AirPrint / IPP Everywhere print server: HTTP + IPP, job handling, and the
+// URF/PWG raster -> Canon BJ raster pipeline. Portable (BSD sockets +
+// pthreads); the platform supplies the printer connection through hooks.
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// The URF capabilities come from the printer driver (printer_driver_urf).
+#define AIRPRINT_PDL "application/octet-stream,image/urf,image/pwg-raster"
+
+#define AIRPRINT_MAX_SUPPLIES 4
+
+typedef struct airprint_http airprint_http_t;   // one HTTP request/response
+struct printer_driver;                          // printer_driver.h
+
+typedef struct {
+    bool connected;             // printer attached and usable
+    bool busy;                  // printer in use by something else (local test page)
+    // IPP printer-state-reasons keywords, e.g. "marker-supply-low-warning"
+    const char *reasons[6];
+    int nreasons;
+    char message[96];           // printer-state-message
+    struct {
+        const char *name;       // "Black", "Color"
+        const char *color;      // "#000000", "#00FFFF#FF00FF#FFFF00"
+        int level;              // 0..100, -2 unknown, -3 some remaining
+    } supply[AIRPRINT_MAX_SUPPLIES];
+    int nsupplies;
+} airprint_status_t;
+
+typedef struct {
+    const char *name;           // printer-name, e.g. "Canon MG2500 (ESP32)"
+    const char *make_model;     // "Canon MG2500 series"
+    const char *uuid;           // "8d2f0c1e-...." (without urn:uuid:)
+    const char *device_id;      // IEEE 1284 ID advertised to clients
+    int port;                   // 631
+    int web_port;               // the same server on a second port for browsers (80), 0 = none
+    // the printer model: capabilities and its raster -> printer data conversion
+    const struct printer_driver *driver;
+
+    // platform hooks; all optional except job_write
+    void (*get_status)(void *ctx, airprint_status_t *st);
+    int (*job_open)(void *ctx);                 // claim the printer, 0 = ok
+    int (*job_write)(void *ctx, const uint8_t *data, size_t len);  // < 0 aborts
+    int (*job_sync)(void *ctx, const char *what);   // a driver's handshake point (e.g. "StartJob"): flush + wait
+    void (*job_close)(void *ctx, bool ok);
+    void (*job_cancel)(void *ctx);              // asynchronous cancel of the running job
+    void (*job_state)(void *ctx, bool printing);    // e.g. LED
+    void (*identify)(void *ctx);                // Identify-Printer (blink LED)
+    // Extra HTTP resources (scanner, debug downloads). Called for GET/HEAD/
+    // DELETE requests and for POSTs outside /ipp; path includes the query string.
+    // Return true once a response was sent with the airprint_http_* calls
+    // below, false for a 404. Runs on the connection's thread.
+    bool (*http_handler)(void *ctx, airprint_http_t *h, const char *method, const char *path);
+    const char *home_html;      // extra HTML on the status page (e.g. a link)
+    void *ctx;
+} airprint_config_t;
+
+// Starts the listener thread. The config must stay valid.
+int airprint_start(const airprint_config_t *cfg);
+
+// --- responses from http_handler
+// A complete response; extra_headers are full "Name: value\r\n" lines or NULL.
+void airprint_http_send(airprint_http_t *h, const char *status, const char *type, const void *body, size_t len);
+void airprint_http_send_ex(airprint_http_t *h, const char *status, const char *type, const char *extra_headers,
+                           const void *body, size_t len);
+// Reads up to max bytes of the request body; returns the count (0 at the end) or < 0.
+int airprint_http_read_body(airprint_http_t *h, void *buf, size_t max);
+// The request's Host header ("" if none), e.g. "canon-mg2500.local:80".
+const char *airprint_http_host(airprint_http_t *h);
+// The request's If-None-Match header ("" if none).
+const char *airprint_http_if_none_match(airprint_http_t *h);
+// A streamed 200 response of unknown length (chunked); extra_headers are
+// full "Name: value\r\n" lines or NULL. Calls return < 0 once the client is gone.
+int airprint_http_stream_begin(airprint_http_t *h, const char *type, const char *extra_headers);
+int airprint_http_stream_write(airprint_http_t *h, const void *data, size_t len);
+int airprint_http_stream_end(airprint_http_t *h);
+// Takes the connection's socket over (e.g. a long-lived event stream): the
+// server neither reads from nor closes it any more; the caller closes it.
+int airprint_http_detach(airprint_http_t *h);
+
+// events.h source: the printer, its status and the recent jobs as JSON.
+int airprint_status_json(void *ctx, char *buf, size_t n);
+
+// The same for the device's own display: the printer status (refreshed at
+// most every 2 s, as for the JSON) and the running job, else the last one.
+typedef struct {
+    airprint_status_t status;
+    int state;                  // printer-state: 3 idle, 4 processing, 5 stopped
+    struct {
+        int id;                 // 0 = no job yet
+        char name[64];
+        const char *state;      // "pending", "processing", "completed", "canceled", "aborted"
+        int pages;              // pages printed
+        int percent;            // of the page being printed, -1 when not printing
+        long ended_ago;         // seconds since the job ended, -1 while it runs
+    } job;
+} airprint_activity_t;
+// -1 before airprint_start.
+int airprint_get_activity(airprint_activity_t *a);
+
+#ifdef __cplusplus
+}
+#endif

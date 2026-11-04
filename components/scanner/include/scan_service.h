@@ -1,0 +1,83 @@
+// Scanning from the browser. Pages are scanned in colour and JPEG-encoded
+// line by line while the scanner delivers them, so no page is ever held raw.
+//
+// Two modes, both writing into the shared buffer (shared_buf.h):
+//   stream  GET /scan/stream.jpg?dpi=150|300|600&paper=a4|letter|card
+//           (card: a 4 x 2.83 in area in the corner of the glass)
+//           The response is the JPEG, sent while it is scanned. The buffer is
+//           a ring between the scan and the connection; if the client falls
+//           behind, the scan waits (the scanner pauses), and a client that
+//           stops reading for STALL_TIMEOUT cancels it.
+//   last    POST /scan/last?dpi=75|150|300|600&paper=a4|letter|card (150 dpi by default)
+//           A scan kept whole in the buffer (it fails if the JPEG does not
+//           fit); any browser can fetch it from GET /scan/last.jpg, also
+//           while it is scanned (?id=<scan>&from=<offset> for the new part),
+//           until the buffer is reused. The device's button starts one too.
+// Also: GET /scan/status (JSON, also in the /events snapshot), POST /scan/cancel,
+// GET /scan (redirects to the web UI's scanner page).
+//
+// eSCL / AirScan (Mopria eSCL, as macOS Image Capture and sane-airscan use it)
+// under /eSCL: ScannerCapabilities, ScannerStatus, POST ScanJobs (scan
+// settings XML -> 201 + Location), ScanJobs/<id>/NextDocument (the JPEG,
+// streamed while it is scanned, like stream mode; 404 once delivered),
+// ScanJobs/<id>/ScanImageInfo, DELETE ScanJobs/<id>. Platen, RGB24, JPEG,
+// 75/150/300/600 dpi, any area. The platform announces _uscan._tcp.
+// One scan at a time; the device is shared with printing (open() fails while
+// a print job runs, and print jobs are refused while a scan runs).
+#pragma once
+
+#include <stdbool.h>
+
+#include "airprint.h"
+#include "pixma_scan.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct {
+    bool (*available)(void *ctx);       // a scanner is attached
+    int (*open)(void *ctx);             // claim the device for a scan, 0 = ok
+    void (*close)(void *ctx);
+    pixma_io_t io;                      // bulk transfers to the scanner interface
+    void (*state)(void *ctx, bool scanning);    // e.g. LED
+    const char *make_model;             // eSCL MakeAndModel, e.g. "Canon MG2500 series"
+    const char *uuid;                   // eSCL UUID (the printer's, so clients pair them)
+    void *ctx;
+} scan_config_t;
+
+// The config must stay valid. The buffer comes from sbuf_init().
+void scan_service_init(const scan_config_t *cfg);
+// HTTP handler for /scan and /scan/...; false for other paths.
+bool scan_service_http(airprint_http_t *h, const char *method, const char *path);
+bool scan_service_active(void);
+void scan_service_cancel(void);
+// A kept scan as the device's button starts it: an A4 page at 150 dpi.
+// Returns 0, or an HTTP status and the reason in *why.
+int scan_service_start_button(const char **why);
+// The next scan calibrates (the scanner was attached again). The first scan
+// after boot always does; later ones skip it, as SANE does within a session.
+void scan_service_recalibrate(void);
+// events.h source: the scan state as JSON (also GET /scan/status).
+int scan_service_status_json(void *ctx, char *buf, size_t n);
+
+// The same for the device's own display.
+typedef struct {
+    bool scanner;               // a scanner is attached
+    const char *state;          // "idle", "scanning", "done", "failed", "canceled"
+    const char *source;         // "web", "stream", "button", "escl", "" before the first scan
+    const char *paper;          // "a4", "letter", "card", "custom"
+    int dpi;
+    int lines, height;          // lines scanned of height
+    unsigned long bytes;        // JPEG so far
+    long ended_ago;             // seconds since the scan ended, -1 while it runs or before any
+    char error[64];
+} scan_info_t;
+void scan_service_get_info(scan_info_t *info);
+
+// HTML for the status page
+#define SCAN_HOME_HTML "<p><a href=\"/scan\">Scan a document</a></p>"
+
+#ifdef __cplusplus
+}
+#endif
