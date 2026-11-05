@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import ArrowLeft from '@lucide/svelte/icons/arrow-left';
   import Sidebar from './components/Sidebar.svelte';
-  import Toasts from './components/Toasts.svelte';
+  import Toasts from './components/Toasts.svelte';   
   import PrintDialog from './components/PrintDialog.svelte';
   import Viewer from './components/Viewer.svelte';
   import FilePicker from './components/FilePicker.svelte';
